@@ -347,7 +347,7 @@ pmm_init(void) {
 // return vaule: the kernel virtual address of this pte
 pte_t *
 get_pte(pde_t *pgdir, uintptr_t la, bool create) {
-    /* LAB2 EXERCISE 2: YOUR CODE
+    /* LAB2 EXERCISE 2: 2012011370
      *
      * If you need to visit a physical address, please use KADDR()
      * please read pmm.h for useful macros

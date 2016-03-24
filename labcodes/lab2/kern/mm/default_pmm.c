@@ -312,16 +312,11 @@ default_check(void) {
     assert(p0 + 2 == p1);
 
     p2 = p0 + 1;
-    //cprintf(" ready0! \n");
     free_page(p0);
     assert(PageProperty(p0) );
-    //cprintf(" ready1! \n");
     free_pages(p1, 3);
     assert(PageProperty(p0) && p0->property == 1);
-    //assert(p0->property == 1);
-    //assert(PageProperty(p0) );
     assert(PageProperty(p1) && p1->property == 3);
-    //cprintf(" ok1! \n");
     assert((p0 = alloc_page()) == p2 - 1);
     free_page(p0);
     assert((p0 = alloc_pages(2)) == p2 + 1);
