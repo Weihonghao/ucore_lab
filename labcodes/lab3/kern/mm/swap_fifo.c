@@ -49,8 +49,10 @@ _fifo_map_swappable(struct mm_struct *mm, uintptr_t addr, struct Page *page, int
  
     assert(entry != NULL && head != NULL);
     //record the page access situlation
-    /*LAB3 EXERCISE 2: YOUR CODE*/ 
+    /*LAB3 EXERCISE 2: 2012011370*/ 
     //(1)link the most recent arrival page at the back of the pra_list_head qeueue.
+    list_add(head,entry); //逐一查到head后面，这样的话，head前面一个即是最后一个，即最早调入内存的
+    //所以这样的话，以后只要删除head前面就是最早的一个，head后面就是最晚的那个
     return 0;
 }
 /*
@@ -60,14 +62,18 @@ _fifo_map_swappable(struct mm_struct *mm, uintptr_t addr, struct Page *page, int
 static int
 _fifo_swap_out_victim(struct mm_struct *mm, struct Page ** ptr_page, int in_tick)
 {
-     list_entry_t *head=(list_entry_t*) mm->sm_priv;
-         assert(head != NULL);
-     assert(in_tick==0);
+    list_entry_t *head=(list_entry_t*) mm->sm_priv;
+        assert(head != NULL);
+    assert(in_tick==0);
      /* Select the victim */
-     /*LAB3 EXERCISE 2: YOUR CODE*/ 
+     /*LAB3 EXERCISE 2: 2012011370*/ 
      //(1)  unlink the  earliest arrival page in front of pra_list_head qeueue
+    list_entry_t* le = list_prev(head);
+    list_del(le);
      //(2)  set the addr of addr of this page to ptr_page
-     return 0;
+    struct Page* page = le2page(le,pra_page_link); //注意，因为FIFO链表是用pra_page_link成员串起来的，根据le2page的原理，member应该选pra_page_link
+    *ptr_page = page;
+    return 0;
 }
 
 static int
