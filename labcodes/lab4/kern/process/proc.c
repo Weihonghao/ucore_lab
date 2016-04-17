@@ -102,6 +102,18 @@ alloc_proc(void) {
      *       uint32_t flags;                             // Process flag
      *       char name[PROC_NAME_LEN + 1];               // Process name
      */
+    proc->state = PROC_UNINIT;//表示尚未完成创建
+    proc->pid = -1; //do_fork函数要用
+    proc->runs = 0;
+    proc->kstack = 0;
+    proc->need_resched = 0;
+    proc->parent = NULL;
+    proc->mm = NULL;
+    proc->tf = NULL;
+    proc->cr3 = boot_cr3; //内核线程,直接使用内核堆栈
+    proc->flags = 0;
+    memset(proc->name,0,sizeof(PROC_NAME_LEN + 1));
+    memset(&(proc->context),0,sizeof(struct context));
     }
     return proc;
 }
@@ -271,7 +283,7 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
         goto fork_out;
     }
     ret = -E_NO_MEM;
-    //LAB4:EXERCISE2 YOUR CODE
+    //LAB4:EXERCISE2 2012011370
     /*
      * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
      * MACROs or Functions:
@@ -288,14 +300,35 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
      *   proc_list:    the process set's list
      *   nr_process:   the number of process set
      */
-
     //    1. call alloc_proc to allocate a proc_struct
+    proc = alloc_proc();
+    if (proc == NULL) { //alloc_proc错误时,返回的是NULL
+      goto fork_out;
+    }
     //    2. call setup_kstack to allocate a kernel stack for child process
+    if (setup_kstack(proc) !=0 ) { //错误时,返回非零值
+      goto bad_fork_cleanup_proc; //若分配堆栈错误,则释放已经分配的proc控制块的空间
+    }
     //    3. call copy_mm to dup OR share mm according clone_flag
+    if (copy_mm(clone_flags,proc) != 0) {
+      goto bad_fork_cleanup_kstack; //释放已经分配的内核堆栈空间和proc控制块空间
+    }
     //    4. call copy_thread to setup tf & context in proc_struct
+    copy_thread(proc,stack,tf); //stack是父进程的esp,这里用stack,若为0表示创建内核进程
     //    5. insert proc_struct into hash_list && proc_list
+    bool intr_flag;
+    local_intr_save(intr_flag); //这里需要保证操作的原子性,要考虑中断
+    {
+      proc->pid = get_pid();
+      hash_proc(proc); //从hash_proc的实现中看出,hash需要用到pid,所以需要先获取pid
+      list_add(&proc_list,&(proc->list_link));
+      nr_process++;
+    }
+    local_intr_restore(intr_flag);
     //    6. call wakup_proc to make the new child process RUNNABLE
+    wakeup_proc(proc);
     //    7. set ret vaule using child proc's pid
+    ret = proc->pid;
 fork_out:
     return ret;
 

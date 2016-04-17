@@ -384,18 +384,36 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
      *   PTE_W           0x002                   // page table/directory entry flags bit : Writeable
      *   PTE_U           0x004                   // page table/directory entry flags bit : User can access
      */
-#if 0
-    pde_t *pdep = NULL;   // (1) find page directory entry
-    if (0) {              // (2) check if entry is not present
-                          // (3) check if creating is needed, then alloc page for page table
-                          // CAUTION: this page is used for page table, not for common data page
-                          // (4) set page reference
-        uintptr_t pa = 0; // (5) get linear address of page
-                          // (6) clear page content using memset
-                          // (7) set page directory entry's permission
+     //这道题应该这样理解，我们需要返回的是pde和pte，不涉及低12位的offset，但是因为一级页表和二级页表都是页，所以我们就把pde和pte分别对应一个只有一级系统的一级页表和page offset
+    //pgdir是页目录表的虚基址
+    unsigned pde_index = PDX(la);//虚拟地址la的pde（一级页表里面的offset）
+    pde_t *pdep = pgdir+pde_index;;   // (1) find page directory entry
+
+    // (2) check if entry is not present
+    //页目录表项的最低位即是否present的标志位
+    if (!((*pdep) & PTE_P)) {//*pdep指向的是一级页表储存的内容，也就是二级页表的基地址  &操作取出低一位
+        if (!create) {  // (3) check if creating is needed, then alloc page for page table 如果不用create的话
+            return NULL;
+        }
+        struct Page *p = alloc_page(); // CAUTION: this page is used for page table, not for common data page
+        if (p == NULL) {
+            return NULL; //申请失败
+        }
+        set_page_ref(p,1); // (4) set page reference
+        uintptr_t pa = page2pa(p);  // (5) get linear address of page 因为二级页表也是一个页，所以按照页来理解方便一些
+        // (6) clear page content using memset
+        memset(KADDR(pa), 0, PGSIZE); //清空4k的page memset对应的是虚地址，这个不是太清楚
+         // (7) set page directory entry's permission
+        //将这些位都置为1，也就是二级页表的基地址加上这些标识为（全部为1）
+        *pdep = pa | PTE_U | PTE_W | PTE_P;
     }
-    return NULL;          // (8) return page table entry
-#endif
+
+    // (8) return page table entry
+    unsigned pte_index = PTX(la); //右移12位并取低10，得到pte_index 还是虚地址
+    //pde里存的是pagetable的基址
+    pte_t* pte_base = (pte_t *)KADDR(PDE_ADDR(*pdep)); //PDE_ADDR取出二级页表基地址的高20位，估计就是去除那些标志位
+    pte_t* ans = pte_base+pte_index;
+    return ans;
 }
 
 //get_page - get related Page struct for linear address la using PDT pgdir
@@ -432,15 +450,21 @@ page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
      * DEFINEs:
      *   PTE_P           0x001                   // page table/directory entry flags bit : Present
      */
-#if 0
-    if (0) {                      //(1) check if this page table entry is present
-        struct Page *page = NULL; //(2) find corresponding page to pte
-                                  //(3) decrease page reference
-                                  //(4) and free this page when page reference reachs 0
-                                  //(5) clear second page table entry
-                                  //(6) flush tlb
+    //(1) check if this page table entry is present
+    if ((*ptep) &PTE_P) {
+        //(2) find corresponding page to pte
+        struct Page* page = pte2page(*ptep);
+        //(3) decrease page reference
+        page_ref_dec(page);
+        //(4) and free this page when page reference reachs 0
+        if (page->ref == 0) {
+            free_page(page);
+        }
+        //(5) clear second page table entry
+        (*ptep)  = 0;
+        //(6) flush tlb
+        tlb_invalidate(pgdir,la);
     }
-#endif
 }
 
 //page_remove - free an Page which is related linear address la and has an validated pte
