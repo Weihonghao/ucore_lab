@@ -87,7 +87,7 @@ static struct proc_struct *
 alloc_proc(void) {
     struct proc_struct *proc = kmalloc(sizeof(struct proc_struct));
     if (proc != NULL) {
-    //LAB4:EXERCISE1 YOUR CODE
+    //LAB4:EXERCISE1 2012011370
     /*
      * below fields in proc_struct need to be initialized
      *       enum proc_state state;                      // Process state
@@ -103,12 +103,28 @@ alloc_proc(void) {
      *       uint32_t flags;                             // Process flag
      *       char name[PROC_NAME_LEN + 1];               // Process name
      */
+    proc->state = PROC_UNINIT;//表示尚未完成创建
+    proc->pid = -1; //do_fork函数要用
+    proc->runs = 0;
+    proc->kstack = 0;
+    proc->need_resched = 0;
+    proc->parent = NULL;
+    proc->mm = NULL;
+    proc->tf = NULL;
+    proc->cr3 = boot_cr3; //内核线程,直接使用内核堆栈
+    proc->flags = 0;
+    memset(proc->name,0,sizeof(PROC_NAME_LEN));
+    memset(&(proc->context),0,sizeof(struct context));
      //LAB5 YOUR CODE : (update LAB4 steps)
     /*
      * below fields(add in LAB5) in proc_struct need to be initialized	
      *       uint32_t wait_state;                        // waiting state
      *       struct proc_struct *cptr, *yptr, *optr;     // relations between processes
 	 */
+    proc->wait_state =0; //现在尚未处于等待状态
+    proc->cptr = NULL; //这些变量是进程间的关系,初始时全部设为NULL//cptr是孩子
+    proc->yptr = NULL;//yptr是弟弟
+    proc->optr = NULL;//optr是哥哥
     }
     return proc;
 }
@@ -389,12 +405,37 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
      */
 
     //    1. call alloc_proc to allocate a proc_struct
+    proc = alloc_proc();
+    if (proc == NULL) { //alloc_proc错误时,返回的是NULL
+      goto fork_out;
+    }
+    proc->parent = current;//update step 1: set child proc's parent to current process
+    assert(current->wait_state == 0);//make sure current process's wait_state is 0
     //    2. call setup_kstack to allocate a kernel stack for child process
+    if (setup_kstack(proc) !=0 ) { //错误时,返回非零值
+      goto bad_fork_cleanup_proc; //若分配堆栈错误,则释放已经分配的proc控制块的空间
+    }
     //    3. call copy_mm to dup OR share mm according clone_flag
+    if (copy_mm(clone_flags,proc) != 0) {
+      goto bad_fork_cleanup_kstack; //释放已经分配的内核堆栈空间和proc控制块空间
+    }
     //    4. call copy_thread to setup tf & context in proc_struct
+    copy_thread(proc,stack,tf); //stack是父进程的esp,这里用stack,若为0表示创建内核进程
     //    5. insert proc_struct into hash_list && proc_list
+    bool intr_flag;
+    local_intr_save(intr_flag); //这里需要保证操作的原子性,要考虑中断
+    {
+      proc->pid = get_pid();
+      hash_proc(proc); //从hash_proc的实现中看出,hash需要用到pid,所以需要先获取pid
+      set_links(proc); //set_links里面做了插入操作,直接调用即可//update step 5: insert proc_struct into hash_list && proc_list, set the relation links of process
+      //list_add(&proc_list,&(proc->list_link));
+      //nr_process++;//set_links中页做了nr_process++
+    }
+    local_intr_restore(intr_flag);
     //    6. call wakup_proc to make the new child process RUNNABLE
+    wakeup_proc(proc);
     //    7. set ret vaule using child proc's pid
+    ret = proc->pid;
 
 	//LAB5 YOUR CODE : (update LAB4 steps)
    /* Some Functions
@@ -602,6 +643,13 @@ load_icode(unsigned char *binary, size_t size) {
      *          tf_eip should be the entry point of this binary program (elf->e_entry)
      *          tf_eflags should be set to enable computer to produce Interrupt
      */
+    tf->tf_cs = USER_CS;
+    tf->tf_ds = USER_DS;
+    tf->tf_es = USER_DS;
+    tf->tf_ss = USER_DS;
+    tf->tf_esp = USTACKTOP;
+    tf->tf_eip = elf->e_entry;
+    tf->tf_eflags |= FL_IF;
     ret = 0;
 out:
     return ret;
@@ -778,6 +826,7 @@ user_main(void *arg) {
     KERNEL_EXECVE2(TEST, TESTSTART, TESTSIZE);
 #else
     KERNEL_EXECVE(exit);
+    //KERNEL_EXECVE(spin);
 #endif
     panic("user_main execve failed.\n");
 }
