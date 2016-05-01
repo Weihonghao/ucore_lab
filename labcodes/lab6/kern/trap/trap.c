@@ -16,7 +16,6 @@
 #include <sched.h>
 #include <sync.h>
 #include <proc.h>
-
 #define TICK_NUM 100
 
 static void print_ticks() {
@@ -54,9 +53,21 @@ idt_init(void) {
       *     You don't know the meaning of this instruction? just google it! and check the libs/x86.h to know more.
       *     Notice: the argument of lidt is idt_pd. try to find it!
       */
+    extern uintptr_t __vectors[];
+    int i;
+    for (i = 0; i < sizeof(idt) / sizeof(struct gatedesc); i ++) {
+    SETGATE(idt[i], 0, GD_KTEXT, __vectors[i], DPL_KERNEL);
+    }
+    // set for switch from user to kernel
+    SETGATE(idt[T_SWITCH_TOK], 0, GD_KTEXT, __vectors[T_SWITCH_TOK], DPL_USER);
+    //SETGATE(idt[T_SYSCALL ], 1, GD_KTEXT, __vectors[T_SYSCALL ], 3);
+    SETGATE(idt[T_SYSCALL], 1, GD_KTEXT, __vectors[T_SYSCALL], DPL_USER);
+    // load the IDT
+    lidt(&idt_pd);
      /* LAB5 YOUR CODE */ 
      //you should update your lab1 code (just add ONE or TWO lines of code), let user app to use syscall to get the service of ucore
      //so you should setup the syscall interrupt gate in here
+
 }
 
 static const char *
@@ -145,6 +156,7 @@ print_regs(struct pushregs *regs) {
     cprintf("  eax  0x%08x\n", regs->reg_eax);
 }
 
+struct trapframe switchk2u, *switchu2k;
 static inline void
 print_pgfault(struct trapframe *tf) {
     /* error_code:
@@ -220,18 +232,27 @@ trap_dispatch(struct trapframe *tf) {
          * (2) Every TICK_NUM cycle, you can print some info using a funciton, such as print_ticks().
          * (3) Too Simple? Yes, I think so!
          */
+        ticks ++;
+        run_timer_list();
+        //if (ticks % TICK_NUM == 0) {
+            //print_ticks();
+            //assert(current != NULL);
+            //current->need_resched = 1; //原来时间片是在这里做的!
+            //sched_class_proc_tick(current);
+        //}
         /* LAB5 YOUR CODE */
         /* you should upate you lab1 code (just add ONE or TWO lines of code):
          *    Every TICK_NUM cycle, you should set current process's current->need_resched = 1
          */
         /* LAB6 YOUR CODE */
         /* IMPORTANT FUNCTIONS:
-	     * run_timer_list
-	     *----------------------
-	     * you should update your lab5 code (just add ONE or TWO lines of code):
+         * run_timer_list
+         *----------------------
+         * you should update your lab5 code (just add ONE or TWO lines of code):
          *    Every tick, you should update the system time, iterate the timers, and trigger the timers which are end to call scheduler.
          *    You can use one funcitons to finish all these things.
          */
+  
         break;
     case IRQ_OFFSET + IRQ_COM1:
         c = cons_getc();
@@ -243,8 +264,31 @@ trap_dispatch(struct trapframe *tf) {
         break;
     //LAB1 CHALLENGE 1 : YOUR CODE you should modify below codes.
     case T_SWITCH_TOU:
-    case T_SWITCH_TOK:
+        if (tf->tf_cs != USER_CS) {
+            switchk2u = *tf;
+            switchk2u.tf_cs = USER_CS;
+            switchk2u.tf_ds = switchk2u.tf_es = switchk2u.tf_ss = USER_DS;
+            switchk2u.tf_esp = (uint32_t)tf + sizeof(struct trapframe) - 8;
+            
+            // set eflags, make sure ucore can use io under user mode.
+            // if CPL > IOPL, then cpu will generate a general protection.
+            switchk2u.tf_eflags |= FL_IOPL_MASK;
+            
+            // set temporary stack
+            // then iret will jump to the right stack
+            *((uint32_t *)tf - 1) = (uint32_t)&switchk2u;
+        }
+        break;
+    case T_SWITCH_TOK:      
         panic("T_SWITCH_** ??\n");
+        if (tf->tf_cs != KERNEL_CS) {
+            tf->tf_cs = KERNEL_CS;
+            tf->tf_ds = tf->tf_es = KERNEL_DS;
+            tf->tf_eflags &= ~FL_IOPL_MASK;
+            switchu2k = (struct trapframe *)(tf->tf_esp - (sizeof(struct trapframe) - 8));
+            memmove(switchu2k, tf, sizeof(struct trapframe) - 8);
+            *((uint32_t *)tf - 1) = (uint32_t)switchu2k;
+        }
         break;
     case IRQ_OFFSET + IRQ_IDE1:
     case IRQ_OFFSET + IRQ_IDE2:
