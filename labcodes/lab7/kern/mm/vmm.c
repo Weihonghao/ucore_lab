@@ -451,11 +451,23 @@ do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
     *   mm->pgdir : the PDT of these vma
     *
     */
-#if 0
-    /*LAB3 EXERCISE 1: YOUR CODE*/
-    ptep = ???              //(1) try to find a pte, if pte's PT(Page Table) isn't existed, then create a PT.
-    if (*ptep == 0) {
+#if 1
+    /*LAB3 EXERCISE 1: 2012011370*/
+    //(1) try to find a pte, if pte's PT(Page Table) isn't existed, then create a PT.
+    ptep = get_pte(mm->pgdir, addr, 1);
+    if (ptep == NULL) 
+    { //根据get_pte的实现，如果返回NULL，表示页表不存在，且分配新的页表空间失败
+        goto failed;
+    }            
+    if (*ptep == 0) 
+    {//如果页表存在，但页表项为0，说明该页表项尚未分配物理空间
                             //(2) if the phy addr isn't exist, then alloc a page & map the phy addr with logical addr
+
+        struct Page* newppage = pgdir_alloc_page(mm->pgdir,addr,perm);
+        if (newppage == NULL) 
+        { //分配失败
+            goto failed;
+        }
 
     }
     else {
@@ -472,19 +484,29 @@ do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
     */
     /*
      * LAB5 CHALLENGE ( the implmentation Copy on Write)
-		There are 2 situlations when code comes here.
-		  1) *ptep & PTE_P == 1, it means one process try to write a readonly page. 
-		     If the vma includes this addr is writable, then we can set the page writable by rewrite the *ptep.
-		     This method could be used to implement the Copy on Write (COW) thchnology(a fast fork process method).
-		  2) *ptep & PTE_P == 0 & but *ptep!=0, it means this pte is a  swap entry.
-		     We should add the LAB3's results here.
+        There are 2 situlations when code comes here.
+          1) *ptep & PTE_P == 1, it means one process try to write a readonly page. 
+             If the vma includes this addr is writable, then we can set the page writable by rewrite the *ptep.
+             This method could be used to implement the Copy on Write (COW) thchnology(a fast fork process method).
+          2) *ptep & PTE_P == 0 & but *ptep!=0, it means this pte is a  swap entry.
+             We should add the LAB3's results here.
      */
         if(swap_init_ok) {
             struct Page *page=NULL;
                                     //(1）According to the mm AND addr, try to load the content of right disk page
                                     //    into the memory which page managed.
+            int getswappage = swap_in(mm, addr, &page); //这里需要注意，swap_int的第三个参数是Page**，即通过指针返回值
+            if (getswappage != 0) 
+            {
+                goto failed;
+            }
                                     //(2) According to the mm, addr AND page, setup the map of phy addr <---> logical addr
+            if (page_insert(mm->pgdir, page, addr, perm) != 0) 
+            {
+                goto failed;
+            }
                                     //(3) make the page swappable.
+            swap_map_swappable(mm, addr, page, 1);
                                     //(4) [NOTICE]: you myabe need to update your lab3's implementation for LAB5's normal execution.
         }
         else {
@@ -524,4 +546,3 @@ user_mem_check(struct mm_struct *mm, uintptr_t addr, size_t len, bool write) {
     }
     return KERN_ACCESS(addr, addr + len);
 }
-
