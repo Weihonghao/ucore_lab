@@ -108,23 +108,32 @@ int state_condvar[N];                            // the philosopher's state: EAT
 monitor_t mt, *mtp=&mt;                          // monitor
 
 void phi_test_condvar (i) { 
+
     if(state_condvar[i]==HUNGRY&&state_condvar[LEFT]!=EATING
             &&state_condvar[RIGHT]!=EATING) {
+
         cprintf("phi_test_condvar: state_condvar[%d] will eating\n",i);
         state_condvar[i] = EATING ;
         cprintf("phi_test_condvar: signal self_cv[%d] \n",i);
-        cond_signal(&mtp->cv[i]) ;
+        cond_signal(&mtp->cv[i]) ; //
     }
 }
 
 
 void phi_take_forks_condvar(int i) {
-     down(&(mtp->mutex));
-//--------into routine in monitor--------------
-     // LAB7 EXERCISE1: YOUR CODE
+     down(&(mtp->mutex)); //进入管程
+     //--------into routine in monitor--------------
+     // LAB7 EXERCISE1: 2012011370
      // I am hungry
+     state_condvar[i] = HUNGRY;
      // try to get fork
-//--------leave routine in monitor--------------
+     phi_test_condvar(i);
+     //--------leave routine in monitor--------------
+     if ( state_condvar[i] != EATING) { //取刀叉失败时
+
+         cond_wait(&mtp->cv[i]); //等待条件变量
+
+     }
       if(mtp->next_count>0)
          up(&(mtp->next));
       else
@@ -135,9 +144,12 @@ void phi_put_forks_condvar(int i) {
      down(&(mtp->mutex));
 
 //--------into routine in monitor--------------
-     // LAB7 EXERCISE1: YOUR CODE
+     // LAB7 EXERCISE1: 2012011370
      // I ate over
+     state_condvar[i] = THINKING;
      // test left and right neighbors
+     phi_test_condvar(LEFT);
+     phi_test_condvar(RIGHT);
 //--------leave routine in monitor--------------
      if(mtp->next_count>0)
         up(&(mtp->next));
