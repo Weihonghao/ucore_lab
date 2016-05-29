@@ -541,7 +541,7 @@ sfs_close(struct inode *node) {
 }
 
 /*  
- * sfs_io_nolock - Rd/Wr a file contentfrom offset position to offset+ length  disk blocks<-->buffer (in memroy)
+ * sfs_io_nolock - Rd/Wr a file content from offset position to offset+ length  disk blocks<-->buffer (in memroy)
  * @sfs:      sfs file system
  * @sin:      sfs inode in memory
  * @buf:      the buffer Rd/Wr
@@ -549,23 +549,26 @@ sfs_close(struct inode *node) {
  * @alenp:    the length need to read (is a pointer). and will RETURN the really Rd/Wr lenght
  * @write:    BOOL, 0 read, 1 write
  */
+
+//called by sfs_io ret = sfs_io_nolock(sfs, sin, iob->io_base, iob->io_offset, &alen, write);
+
 static int
 sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset, size_t *alenp, bool write) {
-    struct sfs_disk_inode *din = sin->din;
-    assert(din->type != SFS_TYPE_DIR);
-    off_t endpos = offset + *alenp, blkoff;
+    struct sfs_disk_inode *din = sin->din; //硬盘节点
+    assert(din->type != SFS_TYPE_DIR); //确认目录不能读写
+    off_t endpos = offset + *alenp, blkoff = 0;
     *alenp = 0;
 	// calculate the Rd/Wr end position
     if (offset < 0 || offset >= SFS_MAX_FILE_SIZE || offset > endpos) {
         return -E_INVAL;
     }
-    if (offset == endpos) {
+    if (offset == endpos) { //起始位置即文件结束则不用读
         return 0;
     }
     if (endpos > SFS_MAX_FILE_SIZE) {
         endpos = SFS_MAX_FILE_SIZE;
     }
-    if (!write) {
+    if (!write) {  //如果是读
         if (offset >= din->size) {
             return 0;
         }
@@ -575,9 +578,9 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
     }
 
     int (*sfs_buf_op)(struct sfs_fs *sfs, void *buf, size_t len, uint32_t blkno, off_t offset);
-    int (*sfs_block_op)(struct sfs_fs *sfs, void *buf, uint32_t blkno, uint32_t nblks);
+    int (*sfs_block_op)(struct sfs_fs *sfs, void *buf, uint32_t blkno, uint32_t nblks); //定义了两个函数指针
     if (write) {
-        sfs_buf_op = sfs_wbuf, sfs_block_op = sfs_wblock;
+        sfs_buf_op = sfs_wbuf, sfs_block_op = sfs_wblock; //基本block级的操作
     }
     else {
         sfs_buf_op = sfs_rbuf, sfs_block_op = sfs_rblock;
@@ -589,7 +592,8 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
     uint32_t blkno = offset / SFS_BLKSIZE;          // The NO. of Rd/Wr begin block
     uint32_t nblks = endpos / SFS_BLKSIZE - blkno;  // The size of Rd/Wr blocks
 
-  //LAB8:EXERCISE1 YOUR CODE HINT: call sfs_bmap_load_nolock, sfs_rbuf, sfs_rblock,etc. read different kind of blocks in file
+    //LAB8:EXERCISE1 2012011370
+    //HINT: call sfs_bmap_load_nolock, sfs_rbuf, sfs_rblock,etc. read different kind of blocks in file
 	/*
 	 * (1) If offset isn't aligned with the first block, Rd/Wr some content from offset to the end of the first block
 	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op
@@ -599,11 +603,86 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
      * (3) If end position isn't aligned with the last block, Rd/Wr some content from begin to the (endpos % SFS_BLKSIZE) of the last block
 	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op	
 	*/
+
+    //(1)
+    if (offset % SFS_BLKSIZE != 0) {  //如果offset不是和blocksize对齐,则先读写一些内容使得它对齐
+    	blkoff = offset % SFS_BLKSIZE;
+    	size = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - offset); //如果要读写的内容大于一个block，那么就把没对齐的先读写了，否则就直接把该读写的读写了
+    	uint32_t diskblkno = 0;
+    	ret = sfs_bmap_load_nolock(sfs, sin, blkno, &diskblkno); //该函数的作用是根据blkno找到disk上的block number，存在diskblno里
+
+    	if (ret != 0) {
+    		cprintf("error in sfs_bmap_load_nolock");
+    		goto out;
+    	}
+
+    	//利用sfs_rbuf和sfs_wbuf将不对齐的部分读到buffer里或写入
+    	ret = sfs_buf_op(sfs,buf,size,diskblkno,blkoff); //这里的blkoff是相对一个block的offset
+    	if (ret != 0) {
+    		cprintf("error in sfs_buf_op");
+    		goto out;
+    	}
+
+    	alen= size;  //已经读/写了这么多，会在后面out处alenp
+
+        if (nblks == 0) { //这里的顺序不能错，应先加alen，然后判断退出
+        	                          //nblks是无符号数！
+        	goto out; //若一开始读写长度小于一个block，那么上面的对齐buf读写已经完成操作，直接准备退出
+        }
+
+    	buf += size; //移动buf首位置，跳过已经读/写的部分
+    	blkno++; //如果offset不对齐SFS_BLKSIZE，则blkno为不对齐部分的blkno，不对齐部分已经用sfs_buf_op读了，则跳过该blk
+    	nblks--; //减去offset未对齐的那个block
+    }
+
+
+
+    //(2) 按block读取余下数据
+    int i = 0;
+    for (i=0; i<nblks; i++) {
+
+    	uint32_t diskblkno = 0;
+    	ret = sfs_bmap_load_nolock(sfs, sin, blkno, &diskblkno); //获取disk block no
+    	if (ret != 0) {
+    		goto out;
+    	}
+
+    	ret = sfs_block_op(sfs,buf,diskblkno,1); //这里用对block的操作,每次操作一个block
+    	if (ret != 0) {
+    		goto out;
+    	}
+
+    	alen += SFS_BLKSIZE;
+    	buf += SFS_BLKSIZE;; //移动buf首位置，跳过已经读/写的部分
+    	blkno++;
+    }
+
+    //(3) 处理读取区域结尾处的块不对齐
+    if (endpos % SFS_BLKSIZE != 0) {
+       	size = endpos % SFS_BLKSIZE;
+       	uint32_t diskblkno = 0;
+       	ret = sfs_bmap_load_nolock(sfs, sin, blkno, &diskblkno);
+
+       	if (ret != 0) {
+       		goto out;
+       	}
+
+       	ret = sfs_buf_op(sfs,buf,size,diskblkno,0);  //这里offset填0，因为从最后一个block起始处开始读写
+       	if (ret != 0) {
+       		goto out;
+       	}
+
+       	alen += size;
+       	blkno++;
+       	nblks--;
+    }
+
+
 out:
-    *alenp = alen;
-    if (offset + alen > sin->din->size) {
-        sin->din->size = offset + alen;
-        sin->dirty = 1;
+    *alenp = alen; //实际读写的长度存在alenp里
+    if (offset + alen > sin->din->size) { //这个条件保证有新内容写入才修改din的size
+        sin->din->size = offset + alen; //如果是写，那么修改disk上文件大小
+        sin->dirty = 1; //inode被修改过
     }
     return ret;
 }

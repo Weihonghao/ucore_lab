@@ -53,7 +53,7 @@ CFLAGS	+= $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 &
 else
 HOSTCC		:= clang
 HOSTCFLAGS	:= -g -Wall -O2
-CC		:= $(GCCPREFIX)clang
+CC		:= clang
 CFLAGS	:= -fno-builtin -Wall -g -m32 -mno-sse -nostdinc $(DEFS)
 CFLAGS	+= $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
 endif
@@ -273,6 +273,9 @@ $(foreach p,$(USER_BINS),$(eval $(call fscopy,$(p),$(SFSROOT)$(SLASH))))
 $(SFSROOT):
 	if [ ! -d "$(SFSROOT)" ]; then mkdir $(SFSROOT); fi
 
+$(SFSROOT):
+	$(V)$(MKDIR) $@
+
 $(SFSIMG): $(SFSROOT) $(SFSBINS) | $(call totarget,mksfs)
 	$(V)dd if=/dev/zero of=$@ bs=1M count=128
 	@$(call totarget,mksfs) $@ $(SFSROOT)
@@ -309,15 +312,15 @@ QEMUOPTS = -hda $(UCOREIMG) -drive file=$(SWAPIMG),media=disk,cache=writeback -d
 
 .PHONY: qemu qemu-nox debug debug-nox monitor
 qemu-mon: $(UCOREIMG) $(SWAPIMG) $(SFSIMG)
-	$(V)$(QEMU) -monitor stdio $(QEMUOPTS) -serial null
+	$(V)$(QEMU)  -no-reboot -monitor stdio $(QEMUOPTS) -serial null
 qemu: $(UCOREIMG) $(SWAPIMG) $(SFSIMG)
-	$(V)$(QEMU) -parallel stdio $(QEMUOPTS) -serial null
+	$(V)$(QEMU)  -no-reboot -parallel stdio $(QEMUOPTS) -serial null
 
 qemu-nox: $(UCOREIMG) $(SWAPIMG) $(SFSIMG)
-	$(V)$(QEMU) -serial mon:stdio $(QEMUOPTS) -nographic
+	$(V)$(QEMU)  -no-reboot -serial mon:stdio $(QEMUOPTS) -nographic
 
 monitor: $(UCOREIMG) $(SWAPING) $(SFSIMG)
-	$(V)$(QEMU) -monitor stdio $(QEMUOPTS) -serial null
+	$(V)$(QEMU)  -no-reboot  -monitor stdio $(QEMUOPTS) -serial null
 
 TERMINAL := gnome-terminal
 
@@ -339,6 +342,9 @@ run-%: build-%
 
 sh-%: script-%
 	$(V)$(QEMU) -parallel stdio $(QEMUOPTS) -serial null
+
+run-nox-%: build-%
+	$(V)$(QEMU) -serial mon:stdio $(QEMUOPTS) -nographic
 
 build-%: touch
 	$(V)$(MAKE) $(MAKEOPTS) "DEFS+=-DTEST=$*" 
@@ -369,7 +375,7 @@ print-%:
 .PHONY: clean dist-clean handin packall tags
 clean:
 	$(V)$(RM) $(GRADE_GDB_IN) $(GRADE_QEMU_OUT)  $(SFSBINS) cscope* tags
-	-$(RM) -r $(OBJDIR) $(BINDIR)
+	$(V)$(RM) -r $(OBJDIR) $(BINDIR) $(SFSROOT)
 
 dist-clean: clean
 	-$(RM) $(HANDIN)

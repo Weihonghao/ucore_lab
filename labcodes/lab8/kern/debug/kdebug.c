@@ -77,6 +77,7 @@ struct userstabdata {
  *      stab_binsearch(stabs, &left, &right, N_SO, 0xf0100184);
  * will exit setting left = 118, right = 554.
  * */
+// stab table 即调试信息表，stab是储存调试信息的一项
 static void
 stab_binsearch(const struct stab *stabs, int *region_left, int *region_right,
            int type, uintptr_t addr) {
@@ -335,7 +336,7 @@ read_eip(void) {
  * */
 void
 print_stackframe(void) {
-     /* LAB1 YOUR CODE : STEP 1 */
+     /* LAB1 2012011370 : STEP 1 */
      /* (1) call read_ebp() to get the value of ebp. the type is (uint32_t);
       * (2) call read_eip() to get the value of eip. the type is (uint32_t);
       * (3) from 0 .. STACKFRAME_DEPTH
@@ -347,5 +348,46 @@ print_stackframe(void) {
       *           NOTICE: the calling funciton's return addr eip  = ss:[ebp+4]
       *                   the calling funciton's ebp = ss:[ebp]
       */
+	// read_ebp and read_eip the return is uint32_t
+ 	uint32_t ebp = read_ebp();
+	uint32_t eip = read_eip();
+	int i = 0;
+	for (i = 0; i<STACKFRAME_DEPTH; i++) {
+		// 08格式化32位输出
+		cprintf("ebp:0x%08x eip:0x%08x ", ebp,eip);
+		cprintf("args:");
+		//ebp地址加1是返回地址，加2是参数1
+		uint32_t* argp = (uint32_t*)ebp + 2;
+		int j = 0;
+		for (j=0; j<4; j++) {
+			cprintf("0x%08x ", argp[j]);
+		}
+		cprintf("\n");
+		print_debuginfo(eip-1);
+		//注意ebp和eip都是指向栈中某个位置的指针
+		eip = ((uint32_t *)ebp)[1]; //返回地址，即调用者返回后的语句
+		ebp = ((uint32_t *)ebp)[0]; //上一个函数栈的ebp值 注意要先取eip再取ebp
+
+		if (ebp == 0) {
+			break; // 在bootasm.S里，引导UCore到内存前，ebp已经被设为0
+		}
+
+
+	}
+	  /*uint32_t ebp = read_ebp(), eip = read_eip();
+
+	    int i, j;
+	    for (i = 0; ebp != 0 && i < STACKFRAME_DEPTH; i ++) {
+	        cprintf("ebp:0x%08x eip:0x%08x args:", ebp, eip);
+	        uint32_t *args = (uint32_t *)ebp + 2;
+	        for (j = 0; j < 4; j ++) {
+	            cprintf("0x%08x ", args[j]);
+	        }
+	        cprintf("\n");
+	        print_debuginfo(eip - 1);
+	        eip = ((uint32_t *)ebp)[1];
+	        ebp = ((uint32_t *)ebp)[0];
+	    }*/
+
 }
 

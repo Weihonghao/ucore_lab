@@ -39,6 +39,7 @@ __trapret:
     popl %ds
 
     # get rid of the trap number and error code
+    #now the value of esp is eip in tf
     addl $0x8, %esp
     iret
 

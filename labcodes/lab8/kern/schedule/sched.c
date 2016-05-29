@@ -46,7 +46,8 @@ void
 sched_init(void) {
     list_init(&timer_list);
 
-    sched_class = &default_sched_class;
+   // sched_class = &default_sched_class;
+   sched_class = &default_sched_stride_class;
 
     rq = &__rq;
     rq->max_time_slice = MAX_TIME_SLICE;
@@ -99,6 +100,7 @@ schedule(void) {
     local_intr_restore(intr_flag);
 }
 
+// add timer to timer_list
 void
 add_timer(timer_t *timer) {
     bool intr_flag;

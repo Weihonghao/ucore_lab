@@ -11,6 +11,7 @@
 .set SMAP,                  0x534d4150
 
 # start address should be 0:7c00, in real mode, the beginning address of the running bootloader
+# 下面的cli说明bootloader运行时中断是关闭的
 .globl start
 start:
 .code16                                             # Assemble for 16-bit mode
@@ -18,6 +19,7 @@ start:
     cld                                             # String operations increment
 
     # Set up the important data segment registers (DS, ES, SS).
+    #word 16bits 用异或清零 把DS ES SS寄存器全部置0 %ax是%eax的低16位
     xorw %ax, %ax                                   # Segment number zero
     movw %ax, %ds                                   # -> Data Segment
     movw %ax, %es                                   # -> Extra Segment
@@ -27,6 +29,8 @@ start:
     #  For backwards compatibility with the earliest PCs, physical
     #  address line 20 is tied low, so that addresses higher than
     #  1MB wrap around to zero by default. This code undoes this.
+    # %al是%eax的低8位
+    # in是读端口指令 out是写端口指令
 seta20.1:
     inb $0x64, %al                                  # Wait for not busy(8042 input buffer empty).
     testb $0x2, %al
@@ -66,6 +70,9 @@ finish_probe:
     # and segment translation that makes virtual addresses
     # identical to physical addresses, so that the
     # effective memory map does not change during the switch.
+    #使用boot loader期间专用的GDT，使得虚地址就是实地址，不必做转换
+    #lgdt 加载全局描述符表的起始地址到GDTR寄存器
+    #将cr0寄存器的0bit位置1，使能保护模式
     lgdt gdtdesc
     movl %cr0, %eax
     orl $CR0_PE_ON, %eax
@@ -73,6 +80,7 @@ finish_probe:
 
     # Jump to next instruction, but in 32-bit code segment.
     # Switches processor into 32-bit mode.
+    #远程跳转指令 ljmp $secion，$offset
     ljmp $PROT_MODE_CSEG, $protcseg
 
 .code32                                             # Assemble for 32-bit mode

@@ -78,8 +78,8 @@ struct vma_struct *
 find_vma(struct mm_struct *mm, uintptr_t addr) {
     struct vma_struct *vma = NULL;
     if (mm != NULL) {
-        vma = mm->mmap_cache;
-        if (!(vma != NULL && vma->vm_start <= addr && vma->vm_end > addr)) {
+        vma = mm->mmap_cache; //当前访问的vma
+        if (!(vma != NULL && vma->vm_start <= addr && vma->vm_end > addr)) { //缓存的vma不合法则从头遍历，合法则直接返回
                 bool found = 0;
                 list_entry_t *list = &(mm->mmap_list), *le = list;
                 while ((le = list_next(le)) != list) {
@@ -93,6 +93,7 @@ find_vma(struct mm_struct *mm, uintptr_t addr) {
                     vma = NULL;
                 }
         }
+
         if (vma != NULL) {
             mm->mmap_cache = vma;
         }
@@ -390,8 +391,9 @@ volatile unsigned int pgfault_num=0;
  */
 int
 do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
-    int ret = -E_INVAL;
+    int ret = -E_INVAL; //-3 在trap.c中，返回不是0即报错
     //try to find a vma which include addr
+    //cprintf("do page fault at 0x%08x\n", addr);
     struct vma_struct *vma = find_vma(mm, addr);
 
     pgfault_num++;
@@ -401,20 +403,20 @@ do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
         goto failed;
     }
     //check the error_code
-    switch (error_code & 3) {
+    switch (error_code & 3) { //获取error_code 的低两位
     default:
             /* error code flag : default is 3 ( W/R=1, P=1): write, present */
     case 2: /* error code flag : (W/R=1, P=0): write, not present */
-        if (!(vma->vm_flags & VM_WRITE)) {
+        if (!(vma->vm_flags & VM_WRITE)) { //写，但vma不可读写
             cprintf("do_pgfault failed: error code flag = write AND not present, but the addr's vma cannot write\n");
             goto failed;
         }
         break;
     case 1: /* error code flag : (W/R=0, P=1): read, present */
-        cprintf("do_pgfault failed: error code flag = read AND present\n");
+        cprintf("do_pgfault failed: error code flag = read AND present\n");  //读且present一般不会page fault
         goto failed;
     case 0: /* error code flag : (W/R=0, P=0): read, not present */
-        if (!(vma->vm_flags & (VM_READ | VM_EXEC))) {
+        if (!(vma->vm_flags & (VM_READ | VM_EXEC))) {  //读，但vma不可读或不可执行
             cprintf("do_pgfault failed: error code flag = read AND not present, but the addr's vma cannot read or exec\n");
             goto failed;
         }
@@ -429,12 +431,12 @@ do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
     if (vma->vm_flags & VM_WRITE) {
         perm |= PTE_W;
     }
-    addr = ROUNDDOWN(addr, PGSIZE);
+    addr = ROUNDDOWN(addr, PGSIZE); //按页对齐
 
-    ret = -E_NO_MEM;
+    ret = -E_NO_MEM; //-4
 
     pte_t *ptep=NULL;
-    /*LAB3 EXERCISE 1: YOUR CODE
+    /*LAB3 EXERCISE 1: 2012011370
     * Maybe you want help comment, BELOW comments can help you finish the code
     *
     * Some Useful MACROs and DEFINEs, you can use them in below implementation.
@@ -451,15 +453,24 @@ do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
     *   mm->pgdir : the PDT of these vma
     *
     */
-#if 0
-    /*LAB3 EXERCISE 1: YOUR CODE*/
-    ptep = ???              //(1) try to find a pte, if pte's PT(Page Table) isn't existed, then create a PT.
-    if (*ptep == 0) {
-                            //(2) if the phy addr isn't exist, then alloc a page & map the phy addr with logical addr
 
+
+    /*LAB3 EXERCISE 1: 2012011370*/
+    //(1) try to find a pte, if pte's PT(Page Table) isn't existed, then create a PT.
+    //cprintf("lalalal1\n");
+    ptep = get_pte(mm->pgdir, addr, 1);
+    if (ptep == NULL) { //根据get_pte的实现，如果返回NULL，表示页表不存在，且分配新的页表空间失败
+    	goto failed;
     }
-    else {
-    /*LAB3 EXERCISE 2: YOUR CODE
+    //(2) if the phy addr isn't exist, then alloc a page & map the phy addr with logical addr
+    if (*ptep == 0) { //如果页表存在，但页表项为0，说明该页表项尚未分配物理空间
+       // cprintf("lalalal2.5\n");
+    	struct Page* newppage = pgdir_alloc_page(mm->pgdir,addr,perm);
+    	if (newppage == NULL) { //分配失败
+    		goto failed;
+    	}
+    } else { //如果页表项内容不是全为0，说明这实际上是一个swap_entry_t，第0位表示not present，再高7位保留，最高24位索引swap文件的起始扇区
+    /*LAB3 EXERCISE 2: 2012011370
     * Now we think this pte is a  swap entry, we should load data from disk to a page with phy addr,
     * and map the phy addr with logical addr, trigger swap manager to record the access situation of this page.
     *
@@ -481,20 +492,29 @@ do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
      */
         if(swap_init_ok) {
             struct Page *page=NULL;
-                                    //(1）According to the mm AND addr, try to load the content of right disk page
-                                    //    into the memory which page managed.
-                                    //(2) According to the mm, addr AND page, setup the map of phy addr <---> logical addr
-                                    //(3) make the page swappable.
-                                    //(4) [NOTICE]: you myabe need to update your lab3's implementation for LAB5's normal execution.
+            //(1）According to the mm AND addr, try to load the content of right disk page
+            //    into the memory which page managed.
+            int getswappage = swap_in(mm, addr, &page); //这里需要注意，swap_int的第三个参数是Page**，即通过指针返回值
+            if (getswappage != 0) {
+            	//return 0;
+            	goto failed;
+            }
+            //(2) According to the mm, addr AND page, setup the map of phy addr <---> logical addr
+            if (page_insert(mm->pgdir, page, addr, perm) != 0) {
+            	goto failed;
+            }
+            //(3) make the page swappable.
+            swap_map_swappable(mm, addr, page, 1); //第四个参数貌似是插入的意思，但是查到实现里，暂时没发现其用处
         }
         else {
             cprintf("no swap_init_ok but ptep is %x, failed\n",*ptep);
             goto failed;
         }
    }
-#endif
+
    ret = 0;
 failed:
+ 	 //cprintf("lalalal2,ret:%d\n",ret);
     return ret;
 }
 

@@ -25,7 +25,7 @@
  *              le2page (in memlayout.h), (in future labs: le2vma (in vmm.h), le2proc (in proc.h),etc.
  */
 
-list_entry_t pra_list_head;
+list_entry_t pra_list_head; //这是链表头，按调入内存的时间顺序来加入链表
 /*
  * (2) _fifo_init_mm: init pra_list_head and let  mm->sm_priv point to the addr of pra_list_head.
  *              Now, From the memory control struct mm_struct, we can access FIFO PRA
@@ -34,7 +34,7 @@ static int
 _fifo_init_mm(struct mm_struct *mm)
 {     
      list_init(&pra_list_head);
-     mm->sm_priv = &pra_list_head;
+     mm->sm_priv = &pra_list_head; //原来sm_priv是这样用的！
      //cprintf(" mm->sm_priv %x in fifo_init_mm\n",mm->sm_priv);
      return 0;
 }
@@ -49,8 +49,9 @@ _fifo_map_swappable(struct mm_struct *mm, uintptr_t addr, struct Page *page, int
  
     assert(entry != NULL && head != NULL);
     //record the page access situlation
-    /*LAB3 EXERCISE 2: YOUR CODE*/ 
+    /*LAB3 EXERCISE 2: 2012011370*/
     //(1)link the most recent arrival page at the back of the pra_list_head qeueue.
+    list_add(head,entry); //逐一查到head后面，这样的话，head前面一个即是最后一个，即最早调入内存的
     return 0;
 }
 /*
@@ -61,12 +62,16 @@ static int
 _fifo_swap_out_victim(struct mm_struct *mm, struct Page ** ptr_page, int in_tick)
 {
      list_entry_t *head=(list_entry_t*) mm->sm_priv;
-         assert(head != NULL);
+     assert(head != NULL);
      assert(in_tick==0);
      /* Select the victim */
-     /*LAB3 EXERCISE 2: YOUR CODE*/ 
+     /*LAB3 EXERCISE 2: 2012011370*/
      //(1)  unlink the  earliest arrival page in front of pra_list_head qeueue
-     //(2)  set the addr of addr of this page to ptr_page
+     list_entry_t* le = list_prev(head);
+     //(2)  set the addr of addr of this page to ptr_page  返回该页的地址的地址 囧 即Page* 的地址
+     struct Page* page = le2page(le,pra_page_link); //注意，因为FIFO链表是用pra_page_link成员串起来的，根据le2page的原理，member应该选pra_page_link
+     list_del(le);     
+    *ptr_page = page;
      return 0;
 }
 
@@ -85,6 +90,7 @@ _fifo_check_swap(void) {
     *(unsigned char *)0x2000 = 0x0b;
     assert(pgfault_num==4);
     cprintf("write Virt Page e in fifo_check_swap\n");
+    //cprintf("lalala--\n");
     *(unsigned char *)0x5000 = 0x0e;
     assert(pgfault_num==5);
     cprintf("write Virt Page b in fifo_check_swap\n");

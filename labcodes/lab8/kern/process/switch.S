@@ -3,6 +3,7 @@
 switch_to:                      # switch_to(from, to)
 
     # save from's registers
+    # push ebp is done in switch_to so now esp+4 is the first para and esp is the return addr
     movl 4(%esp), %eax          # eax points to from
     popl 0(%eax)                # save eip !popl
     movl %esp, 4(%eax)

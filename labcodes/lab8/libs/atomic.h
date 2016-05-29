@@ -18,7 +18,7 @@ static inline bool test_bit(int nr, volatile void *addr) __attribute__((always_i
  * */
 static inline void
 set_bit(int nr, volatile void *addr) {
-    asm volatile ("btsl %1, %0" :"=m" (*(volatile long *)addr) : "Ir" (nr));
+    asm volatile ("btsl %1, %0" :"=m" (*(volatile long *)addr) : "Ir" (nr));  //这里的指令btsl将一个32位操作数中的某一位设置成1。参数nr表示该位的位置
 }
 
 /* *

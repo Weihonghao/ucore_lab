@@ -78,6 +78,7 @@ sysfile_read(int fd, void *base, size_t len) {
             alen = len;
         }
         ret = file_read(fd, buffer, alen, &alen);
+        //cprintf("nanana ret %d  alen %d \n", ret,alen);
         if (alen != 0) {
             lock_mm(mm);
             {

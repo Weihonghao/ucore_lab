@@ -36,13 +36,16 @@ static struct taskstate ts = {0};
 
 // virtual address of physicall page array
 struct Page *pages;
+
+
+
 // amount of physical memory (in pages)
 size_t npage = 0;
 
 // virtual address of boot-time page directory
 pde_t *boot_pgdir = NULL;
 // physical address of boot-time page directory
-uintptr_t boot_cr3;
+uintptr_t boot_cr3; //cr3寄存器内的值，即一级页表基址。一级页表必须页对齐，即12位为0
 
 // physical memory management
 const struct pmm_manager *pmm_manager;
@@ -167,8 +170,10 @@ alloc_pages(size_t n) {
          if (page != NULL || n > 1 || swap_init_ok == 0) break;
          
          extern struct mm_struct *check_mm_struct;
+         //cprintf("lalalal2.7\n");
          //cprintf("page %x, call swap_out in alloc_pages %d\n",page, n);
          swap_out(check_mm_struct, n, 0);
+         //cprintf("lalalal2.8\n");
     }
     //cprintf("n %d,get page %x, No %d in alloc_pages\n",n,page,(page-pages));
     return page;
@@ -202,6 +207,7 @@ nr_free_pages(void) {
 /* pmm_init - initialize the physical memory management */
 static void
 page_init(void) {
+	//在bootasm.s中，将内存地址范围描述符保存在了0x8000的内存起始地址，头4个字节是nr_map
     struct e820map *memmap = (struct e820map *)(0x8000 + KERNBASE);
     uint64_t maxpa = 0;
 
@@ -210,24 +216,27 @@ page_init(void) {
     for (i = 0; i < memmap->nr_map; i ++) {
         uint64_t begin = memmap->map[i].addr, end = begin + memmap->map[i].size;
         cprintf("  memory: %08llx, [%08llx, %08llx], type = %d.\n",
-                memmap->map[i].size, begin, end - 1, memmap->map[i].type);
-        if (memmap->map[i].type == E820_ARM) {
-            if (maxpa < end && begin < KMEMSIZE) {
+                memmap->map[i].size, begin, end - 1, memmap->map[i].type);  //打印内存信息
+
+        if (memmap->map[i].type == E820_ARM)  {  //E820_ARM:address range memory
+            if (maxpa < end && begin < KMEMSIZE)  { //the maximum amount of physical memory  bootloader中写入的map[i].addr是不加C0000000的
                 maxpa = end;
             }
         }
-    }
+    } //end for
+
     if (maxpa > KMEMSIZE) {
-        maxpa = KMEMSIZE;
+        maxpa = KMEMSIZE; //最大物理内存地址
     }
 
-    extern char end[];
+    extern char end[];  //在kernel.ld中，end是BBS段的结束地址
 
-    npage = maxpa / PGSIZE;
-    pages = (struct Page *)ROUNDUP((void *)end, PGSIZE);
-
+    npage = maxpa / PGSIZE; //X86物理内存地址起始为0
+    //cprintf(" total page num :%d\n", npage);
+    pages = (struct Page *)ROUNDUP((void *)end, PGSIZE); //由于bootloader加载ucore的结束地址（用全局指针变量end记录）以上的空间没有被使用
+                                                                                                                   //把end按页大小为边界去整后，作为管理页级物理内存空间所需的Page结构的内存空间
     for (i = 0; i < npage; i ++) {
-        SetPageReserved(pages + i);
+        SetPageReserved(pages + i);  //将用来存内存管理结构pages的空间设为已用
     }
 
     uintptr_t freemem = PADDR((uintptr_t)pages + sizeof(struct Page) * npage);
@@ -245,7 +254,8 @@ page_init(void) {
                 begin = ROUNDUP(begin, PGSIZE);
                 end = ROUNDDOWN(end, PGSIZE);
                 if (begin < end) {
-                    init_memmap(pa2page(begin), (end - begin) / PGSIZE);
+                    //cprintf("  memory debug begin: %08llx, end: %08llx , size: %d \n", begin,end, (end - begin) / PGSIZE);
+                    init_memmap(pa2page(begin), (end - begin) / PGSIZE);  //pa2page就是把虚地址右移12位，因为每页4k
                 }
             }
         }
@@ -363,7 +373,7 @@ pmm_init(void) {
 // return vaule: the kernel virtual address of this pte
 pte_t *
 get_pte(pde_t *pgdir, uintptr_t la, bool create) {
-    /* LAB2 EXERCISE 2: YOUR CODE
+    /* LAB2 EXERCISE 2: 2012011370
      *
      * If you need to visit a physical address, please use KADDR()
      * please read pmm.h for useful macros
@@ -384,18 +394,37 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
      *   PTE_W           0x002                   // page table/directory entry flags bit : Writeable
      *   PTE_U           0x004                   // page table/directory entry flags bit : User can access
      */
-#if 0
-    pde_t *pdep = NULL;   // (1) find page directory entry
-    if (0) {              // (2) check if entry is not present
-                          // (3) check if creating is needed, then alloc page for page table
-                          // CAUTION: this page is used for page table, not for common data page
-                          // (4) set page reference
-        uintptr_t pa = 0; // (5) get linear address of page
-                          // (6) clear page content using memset
-                          // (7) set page directory entry's permission
+	//pgdir是页目录表的虚基址
+	unsigned pde_index = PDX(la);
+	//cprintf("pde_index:%d\n",pde_index);
+    pde_t *pdep = pgdir+pde_index;;   // (1) find page directory entry
+
+    // (2) check if entry is not present
+    //页目录表项的最低位即是否present的标志位
+    if (!(*pdep) & PTE_P) {
+    	if (!create) {  // (3) check if creating is needed, then alloc page for page table
+    		return NULL;
+    	}
+    	struct Page *p = alloc_page(); // CAUTION: this page is used for page table, not for common data page
+    	if (p == NULL) {
+    		//cprintf("alloc NULL\n");
+    		return NULL; //申请失败
+    	}
+    	set_page_ref(p,1); // (4) set page reference
+    	uintptr_t pa = page2pa(p);  // (5) get linear address of page
+    	// (6) clear page content using memset
+    	memset(KADDR(pa), 0, PGSIZE); //清空4k的page
+    	 // (7) set page directory entry's permission
+    	//将这些位都置为1
+    	*pdep = pa | PTE_U | PTE_W | PTE_P ;
     }
-    return NULL;          // (8) return page table entry
-#endif
+
+    // (8) return page table entry
+    unsigned pte_index = PTX(la); //右移12位并取低10，得到pte_index
+    //pde里存的是pagetable的基址
+    pte_t* pte_base = (pte_t *)KADDR(PDE_ADDR(*pdep)); //PDE_ADDR的实现优点奇怪
+    pte_t* ans = pte_base+pte_index;
+    return ans;
 }
 
 //get_page - get related Page struct for linear address la using PDT pgdir
@@ -416,7 +445,7 @@ get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store) {
 //note: PT is changed, so the TLB need to be invalidate 
 static inline void
 page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
-    /* LAB2 EXERCISE 3: YOUR CODE
+    /* LAB2 EXERCISE 3: 2012011370
      *
      * Please check if ptep is valid, and tlb must be manually updated if mapping is updated
      *
@@ -432,15 +461,22 @@ page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
      * DEFINEs:
      *   PTE_P           0x001                   // page table/directory entry flags bit : Present
      */
-#if 0
-    if (0) {                      //(1) check if this page table entry is present
-        struct Page *page = NULL; //(2) find corresponding page to pte
-                                  //(3) decrease page reference
-                                  //(4) and free this page when page reference reachs 0
-                                  //(5) clear second page table entry
-                                  //(6) flush tlb
+	//(1) check if this page table entry is present
+	if ((*ptep) &PTE_P) {
+		//(2) find corresponding page to pte
+		struct Page* page = pte2page(*ptep);
+		//(3) decrease page reference
+		page_ref_dec(page);
+        //(4) and free this page when page reference reachs 0
+		if (page->ref == 0) {
+			free_page(page);
+		}
+		//(5) clear second page table entry
+		(*ptep)  = 0;
+        //(6) flush tlb
+		tlb_invalidate(pgdir,la);
     }
-#endif
+
 }
 
 void
@@ -485,10 +521,11 @@ exit_range(pde_t *pgdir, uintptr_t start, uintptr_t end) {
  */
 int
 copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end, bool share) {
-    assert(start % PGSIZE == 0 && end % PGSIZE == 0);
+    assert(start % PGSIZE == 0 && end % PGSIZE == 0); //需要页对齐
     assert(USER_ACCESS(start, end));
     // copy content by page unit.
-    do {
+    do {  //一页页进行复制
+    	//两个进程start和end是一样的,即有各自的地址空间,只是页目录表不同
         //call get_pte to find process A's pte according to the addr start
         pte_t *ptep = get_pte(from, start, 0), *nptep;
         if (ptep == NULL) {
@@ -508,7 +545,7 @@ copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end, bool share) {
         assert(page!=NULL);
         assert(npage!=NULL);
         int ret=0;
-        /* LAB5:EXERCISE2 YOUR CODE
+        /* LAB5:EXERCISE2 2012011370
          * replicate content of page to npage, build the map of phy addr of nage with the linear addr start
          *
          * Some Useful MACROs and DEFINEs, you can use them in below implementation.
@@ -516,12 +553,17 @@ copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end, bool share) {
          *    page2kva(struct Page *page): return the kernel vritual addr of memory which page managed (SEE pmm.h)
          *    page_insert: build the map of phy addr of an Page with the linear addr la
          *    memcpy: typical memory copy function
-         *
-         * (1) find src_kvaddr: the kernel virtual address of page
-         * (2) find dst_kvaddr: the kernel virtual address of npage
-         * (3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE
-         * (4) build the map of phy addr of  nage with the linear addr start
          */
+         //(1) find src_kvaddr: the kernel virtual address of page
+         //page2kva的返回值类型为void *
+        void* src_kvaddr = page2kva(page);
+         //(2) find dst_kvaddr: the kernel virtual address of npage
+        void* dst_kvaddr = page2kva(npage);
+         //(3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE
+        memcpy(dst_kvaddr, src_kvaddr, PGSIZE);
+         //(4) build the map of phy addr of  nage with the linear addr start
+        ret = page_insert(to,npage,start,perm); //此时的start即是npage的线性地址
+
         assert(ret == 0);
         }
         start += PGSIZE;
@@ -581,9 +623,11 @@ tlb_invalidate(pde_t *pgdir, uintptr_t la) {
 //                  - pa<->la with linear address la and the PDT pgdir
 struct Page *
 pgdir_alloc_page(pde_t *pgdir, uintptr_t la, uint32_t perm) {
+	// cprintf("lalalal2.6\n");
     struct Page *page = alloc_page();
+
     if (page != NULL) {
-        if (page_insert(pgdir, page, la, perm) != 0) {
+        if (page_insert(pgdir, page, la, perm) != 0) { //插入失败
             free_page(page);
             return NULL;
         }

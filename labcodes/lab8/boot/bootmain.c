@@ -17,7 +17,7 @@
  * BOOT UP STEPS
  *  * when the CPU boots it loads the BIOS into memory and executes it
  *
- *  * the BIOS intializes devices, sets of the interrupt routines, and
+ *  * the BIOS intializes devices, sets of the interrupt routines（中断服务例程）, and
  *    reads the first sector of the boot device(e.g., hard-drive)
  *    into memory and jumps to it.
  *
@@ -46,10 +46,10 @@ readsect(void *dst, uint32_t secno) {
     // wait for disk to be ready
     waitdisk();
 
-    outb(0x1F2, 1);                         // count = 1
-    outb(0x1F3, secno & 0xFF);
-    outb(0x1F4, (secno >> 8) & 0xFF);
-    outb(0x1F5, (secno >> 16) & 0xFF);
+    outb(0x1F2, 1);                         // count = 1　读取一个扇区
+    outb(0x1F3, secno & 0xFF);  //取出参数的０～７位
+    outb(0x1F4, (secno >> 8) & 0xFF); //8~15bit
+    outb(0x1F5, (secno >> 16) & 0xFF); //16~23bit
     outb(0x1F6, ((secno >> 24) & 0xF) | 0xE0);
     outb(0x1F7, 0x20);                      // cmd 0x20 - read sectors
 
@@ -62,7 +62,7 @@ readsect(void *dst, uint32_t secno) {
 
 /* *
  * readseg - read @count bytes at @offset from kernel into virtual address @va,
- * might copy more than asked.
+ * might copy more than asked. 读取一个段
  * */
 static void
 readseg(uintptr_t va, uint32_t count, uint32_t offset) {
@@ -86,7 +86,7 @@ readseg(uintptr_t va, uint32_t count, uint32_t offset) {
 void
 bootmain(void) {
     // read the 1st page off disk
-    readseg((uintptr_t)ELFHDR, SECTSIZE * 8, 0);
+    readseg((uintptr_t)ELFHDR, SECTSIZE * 8, 0); //读8个扇区
 
     // is this a valid ELF?
     if (ELFHDR->e_magic != ELF_MAGIC) {
@@ -96,8 +96,8 @@ bootmain(void) {
     struct proghdr *ph, *eph;
 
     // load each program segment (ignores ph flags)
-    ph = (struct proghdr *)((uintptr_t)ELFHDR + ELFHDR->e_phoff);
-    eph = ph + ELFHDR->e_phnum;
+    ph = (struct proghdr *)((uintptr_t)ELFHDR + ELFHDR->e_phoff); // program header 表的起始位置，每个表项是一个指针，指向一个proghdr表
+    eph = ph + ELFHDR->e_phnum; //每个指针４个byte
     for (; ph < eph; ph ++) {
         readseg(ph->p_va & 0xFFFFFF, ph->p_memsz, ph->p_offset);
     }

@@ -41,6 +41,7 @@ swap_init(void)
      
 
      sm = &swap_manager_fifo;
+     //sm = &swap_manager_clock;
      int r = sm->init();
      
      if (r == 0)
@@ -97,19 +98,23 @@ swap_out(struct mm_struct *mm, int n, int in_tick)
           //assert(!PageReserved(page));
 
           //cprintf("SWAP: choose victim page 0x%08x\n", page);
-          
-          v=page->pra_vaddr; 
+          //cprintf("lalalal2.9\n");
+          assert(page != NULL);
+          //cprintf("swap out la :0x%08x\n", page->pra_vaddr);
+          v=page->pra_vaddr;  //这是这一页的线性地址
+          //cprintf("lalalal2.10\n");
           pte_t *ptep = get_pte(mm->pgdir, v, 0);
+
           assert((*ptep & PTE_P) != 0);
 
           if (swapfs_write( (page->pra_vaddr/PGSIZE+1)<<8, page) != 0) {
                     cprintf("SWAP: failed to save\n");
-                    sm->map_swappable(mm, v, page, 0);
+                    sm->map_swappable(mm, v, page, 0); //设为不可换出
                     continue;
           }
           else {
                     cprintf("swap_out: i %d, store page in vaddr 0x%x to disk swap entry %d\n", i, v, page->pra_vaddr/PGSIZE+1);
-                    *ptep = (page->pra_vaddr/PGSIZE+1)<<8;
+                    *ptep = (page->pra_vaddr/PGSIZE+1)<<8; //线性地址按页对齐，即是页帧号，左移八位作为页表项
                     free_page(page);
           }
           

@@ -87,7 +87,7 @@ sfs_rbuf(struct sfs_fs *sfs, void *buf, size_t len, uint32_t blkno, off_t offset
     lock_sfs_io(sfs);
     {
         if ((ret = sfs_rwblock_nolock(sfs, sfs->sfs_buffer, blkno, 0, 1)) == 0) {
-            memcpy(buf, sfs->sfs_buffer + offset, len);
+            memcpy(buf, sfs->sfs_buffer + offset, len); //读取一个block然后取出其中offset到offset+len的内容
         }
     }
     unlock_sfs_io(sfs);

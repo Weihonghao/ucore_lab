@@ -54,6 +54,15 @@ static uint16_t *crt_buf;
 static uint16_t crt_pos;
 static uint16_t addr_6845;
 
+// 显示器初始化，CGA 是 Color Graphics Adapter 的缩写
+// CGA显存按照下面的方式映射：
+//   -- 0xB0000 - 0xB7777 单色字符模式
+//   -- 0xB8000 - 0xBFFFF 彩色字符模式及 CGA 兼容图形模式
+// 6845芯片是IBM PC中的视频控制器
+// CPU通过IO地址0x3B4-0x3B5来驱动6845控制单色显示，通过IO地址0x3D4-0x3D5来控制彩色显示。
+//    -- 数据寄存器 映射 到 端口 0x3D5或0x3B5 
+//    -- 索引寄存器 0x3D4或0x3B4,决定在数据寄存器中的数据表示什么。
+
 /* TEXT-mode CGA/VGA display output */
 
 static void
@@ -70,6 +79,9 @@ cga_init(void) {
     }
 
     // Extract cursor location
+    // 6845索引寄存器的index 0x0E（及十进制的14）== 光标位置(高位)
+    // 6845索引寄存器的index 0x0F（及十进制的15）== 光标位置(低位)
+    // 6845 reg 15 : Cursor Address (Low Byte)
     uint32_t pos;
     outb(addr_6845, 14);
     pos = inb(addr_6845 + 1) << 8;

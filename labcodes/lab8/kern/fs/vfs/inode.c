@@ -28,7 +28,7 @@ void
 inode_init(struct inode *node, const struct inode_ops *ops, struct fs *fs) {
     node->ref_count = 0;
     node->open_count = 0;
-    node->in_ops = ops, node->in_fs = fs;
+    node->in_ops = ops, node->in_fs = fs;  //在这里设置VFS的文件系统和ops
     vop_ref_inc(node);
 }
 
